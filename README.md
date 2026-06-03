@@ -1,8 +1,7 @@
 # EEGFaktura API – Integrations-Dokumentation
 
 Konsolidierte, entwicklerfreundliche Dokumentation der **eegfaktura.at**-API,
-zusammengestellt aus realen Integrationstests im Rahmen des Projekts
-`eegfakturareport` (Höllenenergie / BEG Unser Sonnenstrom).
+zusammengestellt aus realen Integrationstests einer Energiegemeinschafts-Anbindung.
 
 > **Zweck:** Referenz für die Anbindung an die eegfaktura-Backend-API
 > (Teilnehmer-/Participant-Verwaltung + Energiedaten-Abruf).
@@ -82,7 +81,7 @@ Alle Requests senden zusätzlich den Header **`X-Tenant`** (in der Regel der RC-
 
 ## Herkunft & Pflege
 
-Diese Doku ist eine Konsolidierung aus dem internen Repo `neuhubereco/eegfakturareport`
-(Markdown-Notizen + TypeScript-Client `src/lib/eeg-faktura-participant.ts`).
+Diese Doku ist eine Konsolidierung aus realen Integrationstests
+(Markdown-Notizen + ein TypeScript-Client gegen die eegfaktura.at-API).
 Bei Änderungen an der eegfaktura-API bitte gegen die
 [DeepWiki-Doku](https://deepwiki.com/eegfaktura/eegfaktura-backend/3-api-layer) abgleichen.
