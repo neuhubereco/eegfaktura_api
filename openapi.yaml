@@ -1,0 +1,364 @@
+openapi: 3.0.3
+info:
+  title: EEGFaktura API (inoffizielle Integrations-Spec)
+  version: "0.1.0"
+  description: >
+    Inoffizielle, aus Integrationstests rekonstruierte OpenAPI-Beschreibung der
+    eegfaktura.at-API (Participant- und Energystore-Bereich). Beschreibt die
+    EXTERNE API von eegfaktura.at, nicht eine selbst entwickelte API.
+
+    Auth ist nicht einheitlich: Schreiboperationen + Energystore nutzen Basic Auth,
+    GET /api/participant erwartet einen Keycloak-Bearer-Token. Siehe docs/.
+  contact:
+    name: eegfaktura-backend (Upstream)
+    url: https://github.com/eegfaktura/eegfaktura-backend
+  license:
+    name: Proprietär / intern
+servers:
+  - url: https://eegfaktura.at
+    description: Produktion
+
+tags:
+  - name: participant
+    description: Teilnehmer-Verwaltung
+  - name: energystore
+    description: Zählpunkt-Metadaten und Energierohdaten
+
+security:
+  - basicAuth: []
+
+paths:
+  /api/participant:
+    post:
+      tags: [participant]
+      summary: Teilnehmer anlegen
+      description: "VERIFIZIERT. Basic Auth. Gibt 201 mit generierter id + participantNumber zurück."
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Participant'
+      responses:
+        '201':
+          description: Teilnehmer erstellt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          description: Ungültiges oder unvollständiges Participant-Objekt
+    get:
+      tags: [participant]
+      summary: Teilnehmer lesen (Tenant)
+      description: >
+        DOKUMENTIERT, NICHT VERIFIZIERT. Erwartet Keycloak-Bearer-Token
+        (NICHT Basic Auth — Basic Auth liefert konsistent 400). Siehe docs/known-issues.md.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - name: id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: email
+          in: query
+          required: false
+          schema: { type: string, format: email }
+      responses:
+        '200':
+          description: Liste/Teilnehmer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Participant'
+        '400':
+          description: Bad Request (u. a. bei Basic Auth statt Bearer)
+
+  /api/participant/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [participant]
+      summary: Teilnehmer aktualisieren
+      description: "DOKUMENTIERT, NICHT VERIFIZIERT. Leere Strings vorher entfernen (UUID-Parse-Fehler)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Participant'
+      responses:
+        '202':
+          description: Aktualisierung akzeptiert
+    delete:
+      tags: [participant]
+      summary: Teilnehmer archivieren (logisches Löschen)
+      description: "DOKUMENTIERT, NICHT VERIFIZIERT."
+      responses:
+        '202':
+          description: Archivierung akzeptiert
+
+  /api/participant/{id}/confirm:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [participant]
+      summary: Teilnehmer bestätigen/aktivieren
+      description: >
+        DOKUMENTIERT, NICHT VERIFIZIERT. Setzt Status ACTIVE, sendet EBMS-Nachrichten
+        für Zählpunkte (falls EEG online) und Aktivierungs-E-Mail.
+      responses:
+        '201':
+          description: Teilnehmer bestätigt
+
+  /energystore/query/{ecId}/metadata:
+    post:
+      tags: [energystore]
+      summary: Zählpunkt-Metadaten (verfügbare Zeiträume)
+      description: "VERIFIZIERT. Basic Auth. Body ist ein leeres JSON-Objekt."
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - name: ecId
+          in: path
+          required: true
+          schema: { type: string }
+          description: Energy Community ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+            example: {}
+      responses:
+        '200':
+          description: Map meteringPoint -> Zeitraum
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/MetadataPeriod'
+              example:
+                "AT00300000000000000000000000000000":
+                  periodBegin: 1733266800000
+                  periodEnd: 1764025200000
+
+  /energystore/query/rawdata:
+    post:
+      tags: [energystore]
+      summary: Energie-Rohdaten (15-Minuten-Werte)
+      description: "VERIFIZIERT. Basic Auth. start/end als absolute Unix-Millisekunden."
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawDataQuery'
+      responses:
+        '200':
+          description: Map meteringPoint -> Datenreihe
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/RawDataSeries'
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: Basic Auth (base64(user:password)). Für POST + Energystore.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Keycloak Access Token (Realm EEGFaktura, login.eegfaktura.at,
+        Client at.ourproject.vfeeg.app). Für GET /api/participant.
+
+  parameters:
+    XTenant:
+      name: X-Tenant
+      in: header
+      required: true
+      schema: { type: string }
+      description: Tenant-Kennung, i. d. R. der RC-Code (z. B. RC######).
+
+  schemas:
+    MetadataPeriod:
+      type: object
+      properties:
+        periodBegin: { type: integer, format: int64, description: Unix-ms }
+        periodEnd: { type: integer, format: int64, description: Unix-ms }
+
+    RawDataQuery:
+      type: object
+      required: [ecId, cps, start, end]
+      properties:
+        ecId: { type: string }
+        cps:
+          type: array
+          items:
+            type: object
+            required: [meteringPoint]
+            properties:
+              meteringPoint: { type: string }
+        start: { type: integer, format: int64, description: absolute Unix-ms }
+        end: { type: integer, format: int64, description: absolute Unix-ms }
+      example:
+        ecId: "{ecId}"
+        cps:
+          - meteringPoint: "{meteringPointId}"
+        start: 1732665600000
+        end: 1732752000000
+
+    RawDataSeries:
+      type: object
+      properties:
+        direction:
+          type: string
+          enum: [CONSUMPTION, GENERATION]
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              ts: { type: integer, format: int64, description: Unix-ms }
+              value:
+                type: array
+                items: { type: number }
+                description: >
+                  [0]=Gesamt (Verbrauch/Erzeugung), [1]=Reststromeinspeisung (nur GENERATION),
+                  [2]=Anteil aus/in EEG-Community.
+              qov:
+                type: array
+                items: { type: integer }
+                description: Quality-of-Value-Flags, gleiche Indizierung wie value.
+
+    Participant:
+      type: object
+      required:
+        - businessRole
+        - role
+        - firstname
+        - lastname
+        - participantSince
+        - meters
+        - status
+        - contact
+        - billingAddress
+        - residentAddress
+        - accountInfo
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        participantNumber: { type: string, readOnly: true }
+        businessRole: { type: string, enum: [EEG_PRIVATE, EEG_BUSINESS] }
+        role: { type: string, enum: [EEG_USER, EEG_ADMIN] }
+        firstname: { type: string }
+        lastname: { type: string }
+        titleBefore: { type: string, nullable: true }
+        titleAfter: { type: string, nullable: true }
+        participantSince: { type: string, description: ISO-Datum }
+        vatNumber: { type: string, nullable: true }
+        taxNumber: { type: string, nullable: true }
+        companyRegisterNumber: { type: string, nullable: true }
+        meters:
+          type: array
+          items: { $ref: '#/components/schemas/Meter' }
+        tariffId: { type: string, nullable: true }
+        status: { type: string, enum: [PENDING, ACTIVE, INACTIVE] }
+        version: { type: integer }
+        createdBy: { type: string }
+        contact:
+          type: object
+          required: [email]
+          properties:
+            phone: { type: string, nullable: true }
+            email: { type: string, format: email }
+        billingAddress: { $ref: '#/components/schemas/Address' }
+        residentAddress: { $ref: '#/components/schemas/Address' }
+        accountInfo:
+          type: object
+          required: [sepaDirectDebit]
+          properties:
+            iban: { type: string, nullable: true }
+            owner: { type: string, nullable: true }
+            bankName: { type: string, nullable: true }
+            mandateReference: { type: string, nullable: true }
+            mandateDate: { type: string, nullable: true }
+            sepaDirectDebit: { type: string, enum: [CORE, B2B] }
+
+    Address:
+      type: object
+      required: [type, street, streetNumber, zip, city]
+      properties:
+        type: { type: string, enum: [BILLING, RESIDENCE] }
+        street: { type: string }
+        streetNumber: { type: string }
+        zip: { type: string }
+        city: { type: string }
+
+    Meter:
+      type: object
+      required:
+        - meteringPoint
+        - direction
+        - status
+        - tariff_id
+        - registeredSince
+        - modifiedAt
+        - processState
+        - participantState
+        - partFact
+      properties:
+        meteringPoint: { type: string }
+        consentId: { type: string, nullable: true }
+        transformer: { type: string, nullable: true }
+        direction: { type: string, enum: [CONSUMPTION, GENERATION] }
+        status: { type: string, enum: [INIT, NEW, ACTIVE, ACTIVATED, REGISTERED] }
+        statusCode: { type: string, nullable: true }
+        tariff_id: { type: string, description: "snake_case (im Gegensatz zu participant.tariffId)" }
+        equipmentNumber: { type: string, nullable: true }
+        equipmentName: { type: string, nullable: true }
+        inverterid: { type: string, nullable: true }
+        street: { type: string }
+        streetNumber: { type: string }
+        city: { type: string }
+        zip: { type: string }
+        registeredSince: { type: string, description: ISO-Datum }
+        modifiedAt: { type: string, description: ISO-Datum }
+        modifiedBy: { type: string }
+        gridOperatorId: { type: string }
+        gridOperatorName: { type: string }
+        processState: { type: string, enum: [NEW, ACTIVE, INACTIVE] }
+        participantState:
+          type: object
+          properties:
+            activeSince: { type: string, nullable: true }
+            inactiveSince: { type: string, nullable: true }
+        partFact: { type: number }
+        activationMode: { type: string }
+        allocationFactor: { type: number, nullable: true }

@@ -1,0 +1,13 @@
+# Secrets – niemals committen
+.env
+.env.*
+!.env.example
+*.token
+*-credentials*
+secrets/
+
+# OS / Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

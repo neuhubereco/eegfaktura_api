@@ -1,0 +1,48 @@
+{
+  "businessRole": "EEG_PRIVATE",
+  "role": "EEG_USER",
+  "firstname": "Max",
+  "lastname": "Mustermann",
+  "participantSince": "2025-01-01",
+  "status": "PENDING",
+  "tariffId": "TARIFF_PLACEHOLDER",
+  "contact": {
+    "phone": "+43 660 0000000",
+    "email": "max@example.at"
+  },
+  "billingAddress": {
+    "type": "BILLING",
+    "street": "Musterstraße",
+    "streetNumber": "1",
+    "zip": "4020",
+    "city": "Linz"
+  },
+  "residentAddress": {
+    "type": "RESIDENCE",
+    "street": "Musterstraße",
+    "streetNumber": "1",
+    "zip": "4020",
+    "city": "Linz"
+  },
+  "accountInfo": {
+    "iban": "AT00 0000 0000 0000 0000",
+    "owner": "Max Mustermann",
+    "sepaDirectDebit": "CORE"
+  },
+  "meters": [
+    {
+      "meteringPoint": "AT00300000000000000000000000000000",
+      "direction": "CONSUMPTION",
+      "status": "NEW",
+      "tariff_id": "TARIFF_PLACEHOLDER",
+      "registeredSince": "2025-01-01",
+      "modifiedAt": "2025-01-01",
+      "processState": "NEW",
+      "participantState": {
+        "activeSince": null,
+        "inactiveSince": null
+      },
+      "partFact": 1
+    }
+  ]
+}
