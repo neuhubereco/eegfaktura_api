@@ -12,8 +12,6 @@ info:
   contact:
     name: eegfaktura-backend (Upstream)
     url: https://github.com/eegfaktura/eegfaktura-backend
-  license:
-    name: Proprietär / intern
 servers:
   - url: https://eegfaktura.at
     description: Produktion
