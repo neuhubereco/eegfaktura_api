@@ -85,3 +85,12 @@ Diese Doku ist eine Konsolidierung aus realen Integrationstests
 (Markdown-Notizen + ein TypeScript-Client gegen die eegfaktura.at-API).
 Bei Änderungen an der eegfaktura-API bitte gegen die
 [DeepWiki-Doku](https://deepwiki.com/eegfaktura/eegfaktura-backend/3-api-layer) abgleichen.
+
+---
+
+## Lizenz
+
+[MIT](LICENSE) — frei nutzbar, anpassbar und weiterverteilbar (inkl. Beispiel-Code).
+
+> Hinweis: Bezieht sich nur auf den Inhalt **dieses** Repos (Doku + Beispiele).
+> Die eegfaktura.at-API selbst sowie das Upstream-Backend stehen unter ihren eigenen Bedingungen.

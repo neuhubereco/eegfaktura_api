@@ -12,6 +12,9 @@ info:
   contact:
     name: eegfaktura-backend (Upstream)
     url: https://github.com/eegfaktura/eegfaktura-backend
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 servers:
   - url: https://eegfaktura.at
     description: Produktion
