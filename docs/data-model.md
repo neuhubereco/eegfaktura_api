@@ -101,3 +101,7 @@ Diese Strukturen werden im Body von `POST /api/participant` und
   (rekursiv). Leere Strings in UUID-Feldern verursachen serverseitige Parse-Fehler.
 - **`null` ist erlaubt** und sollte nicht pauschal entfernt werden.
 - **Datumsfelder** als ISO-Strings (`YYYY-MM-DD` bzw. ISO-8601).
+- **`partFact` (Teilnahmefaktor) nicht doppelt anwenden:** Die Energie-Rohdaten aus
+  `/energystore/query/rawdata` sind bei den `…T`-OBIS-Codes (G.01T, P.01T) **bereits
+  nach Teilnahmefaktor reduziert** — `partFact` dort nicht nochmal draufrechnen.
+  Details: [endpoints.md → Value mapping](endpoints.md).

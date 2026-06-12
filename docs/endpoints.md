@@ -182,23 +182,55 @@ Beispiel `GENERATION` (zwei Werte pro `value` — `value[2]` entfällt):
 }
 ```
 
-**Value mapping**
+**Value mapping (mit OBIS-Codes)**
 
-Die positionsbasierten `value`-/`qov`-Arrays folgen der EEG-Faktura-Excel-Spaltenreihenfolge:
+Die positionsbasierten `value`-/`qov`-Arrays folgen der EEG-Faktura-Excel-Spaltenreihenfolge.
+Quelle: [Offizielle eegfaktura-Doku — Energiedaten herunterladen](https://docs.eegfaktura.at/books/workflowprozesse/page/energiedaten-herunterladen).
 
-| Richtung | `value[0]` | `value[1]` | `value[2]` |
+| Richtung | Index | OBIS-Code | Excel-Spalte | Bedeutung |
+|---|---|---|---|---|
+| `CONSUMPTION` | `value[0]` | `1-1:1.9.0 G.01T` | Gesamtverbrauch lt. Messung (bei Teilnahme gem. Erzeugung) [KWH] | Gemessener Gesamtverbrauch, reduziert nach Teilnahmefaktor |
+| `CONSUMPTION` | `value[1]` | `1-1:2.9.0 G.02` | Anteil gemeinschaftliche Erzeugung [KWH] | **Maximal zur Verfügung gestellte** Energie der Gemeinschaft (theoretisches Angebot, nicht der Bezug!) |
+| `CONSUMPTION` | `value[2]` | `1-1:2.9.0 G.03` | Eigendeckung gemeinschaftliche Erzeugung [KWH] | Tatsächlicher **Bezug aus der Gemeinschaft** nach Teilnahmefaktor |
+| `GENERATION` | `value[0]` | `1-1:2.9.0 G.01T` | Gesamte gemeinschaftliche Erzeugung [KWH] | Gemessene Erzeugung, reduziert nach Teilnahmefaktor |
+| `GENERATION` | `value[1]` | `1-1:2.9.0 P.01T` | Gesamt/Überschusserzeugung, Gemeinschaftsüberschuss [KWH] | **Überschusseinspeisung** (ins Netz) nach Teilnahmefaktor |
+| `GENERATION` | `value[2]` | — | — | nicht vorhanden (Array hat nur 2 Elemente) |
+
+> ⚠️ **Teilnahmefaktor nicht doppelt anwenden:** Die `…T`-Codes (G.01T, P.01T) sind bereits
+> **nach Teilnahmefaktor reduziert**. Das Feld `partFact` aus dem
+> [`Meter`-Objekt](data-model.md) ist hier also schon eingerechnet — wer es nochmal
+> draufmultipliziert, rechnet doppelt.
+
+**Abrechnungsrelevante Größen (GEA/EEG/BEG-Verrechnung)**
+
+Laut offizieller Doku werden für die Verrechnung verwendet:
+
+| Rolle | Abgerechnete Größe | Berechnung aus `value[]` |
+|---|---|---|
+| Verbraucher | Bezug aus der Gemeinschaft (`G.03`) | `value[2]` — **nicht** `value[1]`! |
+| Erzeuger | Lieferung **in** die Gemeinschaft (`G.01T − P.01T`) | `value[0] − value[1]` — steht **nirgends direkt** im Array |
+
+**Quality-of-Value (`qov`, gleiche Indizierung wie `value`)**
+
+| `qov` | Stufe | Bedeutung | Abrechnung |
 |---|---|---|---|
-| `CONSUMPTION` | `Gesamtverbrauch lt. Messung (bei Teilnahme gem. Erzeugung) [KWH]` | `Anteil gemeinschaftliche Erzeugung [KWH]` | `Eigendeckung gemeinschaftliche Erzeugung [KWH]` |
-| `GENERATION` | `Gesamte gemeinschaftliche Erzeugung [KWH]` | `Gesamt/Überschusserzeugung, Gemeinschaftsüberschuss [KWH]` | not_used |
+| `0` | L0 | Energiedaten fehlen | ❌ |
+| `1` | L1 | Echtwert (gemessen) | ✅ |
+| `2` | L2 | Ersatzwert, belastbar (ändert sich sehr wahrscheinlich nicht mehr) | ✅ |
+| `3` | L3 | Ersatzwert, **nicht belastbar** (z. B. extrapoliert — wird sich noch ändern) | ⚠️ vorläufig |
 
+> ⚠️ **Nur L1- und L2-Werte gehören in eine korrekte Abrechnung.** L3-Zeiträume sind
+> vorläufig und müssen später **erneut abgerufen** werden — eine Sync-Pipeline sollte
+> L3-Daten als „vorläufig" markieren und den Zeitraum re-fetchen, bis L1/L2 vorliegt.
 
-The values map to the OBIS codes like this: https://docs.eegfaktura.at/books/workflowprozesse/page/energiedaten-herunterladen
+**Normative Referenzen (österreichischer Marktstandard)**
 
-**Quality (`qov` pro Value-Index):**
+Das Mapping folgt den ebUtilities-Spezifikationen, nicht einem eegfaktura-Eigenbau:
 
-- `1` / `2` / `3` → `L1` / `L2` / `L3`.
-- `0` (`L0`) = fehlende Daten
-
+- [ebutilities.at — Prozess 453](https://www.ebutilities.at/prozesse/453)
+- [Informationsflüsse Energiegemeinschaften (PDF, 06/2023)](https://www.ebutilities.at/documents/2023/06/202306_Informationsfl%C3%BCsse_Energiegemeinschaften.pdf)
+- [MeterCodes CR MSG (PDF, 12/2023)](https://www.ebutilities.at/documents/2023/12/13122023_MeterCodes_CR_MSG.pdf)
+- [OBIS Metercodes VEZ VNB (PDF, 09/2022)](https://www.ebutilities.at/documents/20220928204643_20220927_OBIS_Metercodes_VEZ_VNB.pdf)
 
 ---
 

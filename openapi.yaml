@@ -252,11 +252,15 @@ components:
                 type: array
                 items: { type: number }
                 description: >
-                  Positionales Array in EEG-Faktura-Excel-Spaltenreihenfolge.
-                  CONSUMPTION: [0]=Gesamtverbrauch lt. Messung (bei Teilnahme gem. Erzeugung) [KWH], [1]=Anteil gemeinschaftliche Erzeugung [KWH],
-                  [2]=Eigendeckung gemeinschaftliche Erzeugung [KWH]. GENERATION:
-                  [0]=Gesamte gemeinschaftliche Erzeugung [KWH], [1]=Gesamt/Überschusserzeugung, Gemeinschaftsüberschuss [KWH]; value[2]
-                  ist für GENERATION nicht vorhanden.
+                  Positionales Array in EEG-Faktura-Excel-Spaltenreihenfolge (OBIS-Codes lt.
+                  docs.eegfaktura.at / ebUtilities).
+                  CONSUMPTION: [0]=Gesamtverbrauch lt. Messung nach Teilnahmefaktor (1-1:1.9.0 G.01T),
+                  [1]=Anteil gemeinschaftliche Erzeugung = maximal verfügbares Angebot, NICHT der Bezug (1-1:2.9.0 G.02),
+                  [2]=Eigendeckung gemeinschaftliche Erzeugung = tatsächlicher Bezug aus der Gemeinschaft (1-1:2.9.0 G.03).
+                  GENERATION: [0]=Gesamte gemeinschaftliche Erzeugung nach Teilnahmefaktor (1-1:2.9.0 G.01T),
+                  [1]=Überschusseinspeisung nach Teilnahmefaktor (1-1:2.9.0 P.01T); value[2] nicht vorhanden.
+                  Abrechnung: Verbraucher = value[2]; Erzeuger-Lieferung in die Gemeinschaft = value[0] - value[1].
+                  Achtung: T-Codes sind bereits nach Teilnahmefaktor (partFact) reduziert — nicht doppelt anwenden.
               qov:
                 type: array
                 items:
@@ -264,7 +268,9 @@ components:
                   nullable: true
                 description: >
                   Quality-of-Value-Flags mit gleicher Indizierung wie value.
-                  1/2/3 entspricht L1/L2/L3. 0 (L0) bedeutet fehlende Daten (z.B. Zeitverschiebung).
+                  0=L0 (Daten fehlen), 1=L1 (Echtwert), 2=L2 (Ersatzwert belastbar),
+                  3=L3 (Ersatzwert nicht belastbar, wird sich noch ändern).
+                  Nur L1/L2 in Abrechnungen verwenden; L3-Zeiträume später erneut abrufen.
 
     Participant:
       type: object
