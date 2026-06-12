@@ -156,6 +156,8 @@ Liefert 15-Minuten-Rohdaten für Zählpunkte in einem absoluten Zeitfenster. **B
 
 **Response:** `200 OK`
 
+Beispiel `CONSUMPTION` (drei Werte pro `value`):
+
 ```json
 {
   "{meteringPointId}": {
@@ -165,13 +167,17 @@ Liefert 15-Minuten-Rohdaten für Zählpunkte in einem absoluten Zeitfenster. **B
     "direction": "CONSUMPTION"
   }
 }
+```
 
+Beispiel `GENERATION` (zwei Werte pro `value` — `value[2]` entfällt):
+
+```json
 {
   "{meteringPointId}": {
     "data": [
-      {"ts":1774738800000,"value":[0,0],"qov":[1,2]}
+      { "ts": 1774738800000, "value": [0, 0], "qov": [1, 2] }
     ],
-    "direction":"GENERATION"
+    "direction": "GENERATION"
   }
 }
 ```
