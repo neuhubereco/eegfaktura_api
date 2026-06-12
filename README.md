@@ -66,6 +66,7 @@ Alle Requests senden zusätzlich den Header **`X-Tenant`** (in der Regel der RC-
 | [docs/authentication.md](docs/authentication.md) | Basic Auth + Keycloak-Bearer-Token-Flow, Header, Tenant |
 | [docs/endpoints.md](docs/endpoints.md) | Alle Endpoints mit Request/Response, getestet vs. dokumentiert |
 | [docs/data-model.md](docs/data-model.md) | `Participant`- und `Meter`-Datenmodell (Felder, Enums) |
+| [docs/eda-processes.md](docs/eda-processes.md) | EDA/Ponton-Hintergrund: ECON/CPF/PT-Prozesse, Ablehnungsgründe, Datenverfügbarkeit, API-Lücken |
 | [docs/known-issues.md](docs/known-issues.md) | `GET /participant` 400-Problem, offene Fragen, Empfehlungen |
 | [openapi.yaml](openapi.yaml) | Maschinenlesbare OpenAPI-3.0-Spec (Swagger/Postman/Codegen) |
 

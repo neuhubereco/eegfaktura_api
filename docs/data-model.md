@@ -68,7 +68,7 @@ Diese Strukturen werden im Body von `POST /api/participant` und
 | `consentId` | string \| null | – | Zustimmungs-ID |
 | `transformer` | string \| null | – | |
 | `direction` | enum | ✅ | `CONSUMPTION` \| `GENERATION` |
-| `status` | enum | ✅ | `INIT` \| `NEW` \| `ACTIVE` \| `ACTIVATED` \| `REGISTERED` |
+| `status` | enum | ✅ | `INIT` \| `NEW` \| `ACTIVE` \| `ACTIVATED` \| `REGISTERED` — `ACTIVE`/`ACTIVATED`/`REGISTERED` = beim Netzbetreiber **aktivierter** Zählpunkt, `NEW` = noch nicht aktiviert (Quelle: offizielle Import-Doku) |
 | `statusCode` | string \| null | – | |
 | `tariff_id` | string | ✅ | Tarif-ID (Snake-Case!) |
 | `equipmentNumber` | string \| null | – | |

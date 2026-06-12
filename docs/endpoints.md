@@ -34,6 +34,11 @@ curl -X POST "https://eegfaktura.at/api/participant" \
 > **Wichtig:** Beim Anlegen die zurückgegebene `id` + `participantNumber` **lokal speichern** —
 > es gibt keine zuverlässige Liste-aller-Teilnehmer-Operation (siehe unten).
 
+> **Kein Bulk-Import via API:** Massen-Import von Mitgliedern/Zählpunkten gibt es nur als
+> Excel-Vorlage im Web-UI; Stammdaten-Export ebenfalls nur als XLSX-Download. Dieser
+> Endpoint ist der **einzige programmatische Weg**, Mitglieder anzulegen →
+> [eda-processes.md](eda-processes.md#was-es-nicht-über-die-api-gibt).
+
 ---
 
 ### `GET /api/participant` — Teilnehmer lesen ⚠️
@@ -81,8 +86,14 @@ Bestätigt einen Teilnehmer und aktiviert ihn. Laut Doku `201 Created`.
 
 Server-Aktionen:
 - Setzt Teilnehmer-Status auf `ACTIVE`.
-- Sendet EBMS-Nachrichten für die Zählpunkte (falls EEG online).
+- Sendet EBMS-Nachrichten für die Zählpunkte (falls EEG online) — konkret den
+  **ECON-Anmeldeprozess** beim Netzbetreiber über die Ponton/EDA-Schnittstelle.
 - Versendet Aktivierungs-E-Mail.
+
+> ⏱️ **Asynchron:** Die `201` bestätigt nur die Annahme. Die echte Aktivierung beim
+> Netzbetreiber (`ABSCHLUSS_ECON`) dauert **Tage bis Wochen** und kann abgelehnt werden
+> (z. B. Teilnahmefaktor > 100 %, kein Smart Meter). Details + Ablehnungsgründe:
+> [eda-processes.md](eda-processes.md).
 
 ---
 
@@ -126,6 +137,12 @@ curl -X POST "https://eegfaktura.at/energystore/query/{ecId}/metadata" \
   }
 }
 ```
+
+> **Datenverfügbarkeit:** `periodBegin` entspricht i. d. R. dem **Aktivierungsdatum** des
+> Zählpunkts beim Netzbetreiber — frühere Zeiträume existieren nicht und werden bei
+> Nachforderungen abgelehnt. Netzbetreiber liefern außerdem verzögert: vollständige
+> Monatsdaten sind erst **um den 5. des Folgemonats** zu erwarten.
+> Hintergrund: [eda-processes.md](eda-processes.md).
 
 ---
 
