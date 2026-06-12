@@ -252,12 +252,19 @@ components:
                 type: array
                 items: { type: number }
                 description: >
-                  [0]=Gesamt (Verbrauch/Erzeugung), [1]=Reststromeinspeisung (nur GENERATION),
-                  [2]=Anteil aus/in EEG-Community.
+                  Positionales Array in EEG-Faktura-Excel-Spaltenreihenfolge.
+                  CONSUMPTION: [0]=Gesamtverbrauch lt. Messung (bei Teilnahme gem. Erzeugung) [KWH], [1]=Anteil gemeinschaftliche Erzeugung [KWH],
+                  [2]=Eigendeckung gemeinschaftliche Erzeugung [KWH]. GENERATION:
+                  [0]=Gesamte gemeinschaftliche Erzeugung [KWH], [1]=Gesamt/Überschusserzeugung, Gemeinschaftsüberschuss [KWH]; value[2]
+                  ist für GENERATION nicht vorhanden.
               qov:
                 type: array
-                items: { type: integer }
-                description: Quality-of-Value-Flags, gleiche Indizierung wie value.
+                items:
+                  type: integer
+                  nullable: true
+                description: >
+                  Quality-of-Value-Flags mit gleicher Indizierung wie value.
+                  1/2/3 entspricht L1/L2/L3. 0 (L0) bedeutet fehlende Daten (z.B. Zeitverschiebung).
 
     Participant:
       type: object

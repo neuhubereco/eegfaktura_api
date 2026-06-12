@@ -159,23 +159,40 @@ Liefert 15-Minuten-Rohdaten für Zählpunkte in einem absoluten Zeitfenster. **B
 ```json
 {
   "{meteringPointId}": {
-    "direction": "CONSUMPTION",
     "data": [
       { "ts": 1732665600000, "value": [100.5, 0, 50.2], "qov": [1, 1, 1] }
-    ]
+    ],
+    "direction": "CONSUMPTION"
+  }
+}
+
+{
+  "{meteringPointId}": {
+    "data": [
+      {"ts":1774738800000,"value":[0,0],"qov":[1,2]}
+    ],
+    "direction":"GENERATION"
   }
 }
 ```
 
-**Bedeutung von `value[]`:**
+**Value mapping**
 
-| Index | Bei `CONSUMPTION` | Bei `GENERATION` |
-|---|---|---|
-| `value[0]` | Gesamtverbrauch | Gesamterzeugung |
-| `value[1]` | `0` | Reststromeinspeisung |
-| `value[2]` | Anteil **aus** EEG-Community | Anteil **in** EEG-Community |
+Die positionsbasierten `value`-/`qov`-Arrays folgen der EEG-Faktura-Excel-Spaltenreihenfolge:
 
-`qov` = Quality-of-Value-Flags pro Wert (gleiche Indizierung).
+| Richtung | `value[0]` | `value[1]` | `value[2]` |
+|---|---|---|---|
+| `CONSUMPTION` | `Gesamtverbrauch lt. Messung (bei Teilnahme gem. Erzeugung) [KWH]` | `Anteil gemeinschaftliche Erzeugung [KWH]` | `Eigendeckung gemeinschaftliche Erzeugung [KWH]` |
+| `GENERATION` | `Gesamte gemeinschaftliche Erzeugung [KWH]` | `Gesamt/Überschusserzeugung, Gemeinschaftsüberschuss [KWH]` | not_used |
+
+
+The values map to the OBIS codes like this: https://docs.eegfaktura.at/books/workflowprozesse/page/energiedaten-herunterladen
+
+**Quality (`qov` pro Value-Index):**
+
+- `1` / `2` / `3` → `L1` / `L2` / `L3`.
+- `0` (`L0`) = fehlende Daten
+
 
 ---
 
