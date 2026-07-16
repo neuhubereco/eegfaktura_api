@@ -1,0 +1,28 @@
+name: "✅ To-do / Aufgabe"
+description: "Konkrete, abgeschlossen verifizierbare Aufgabe"
+labels: ["todo"]
+body:
+  - type: textarea
+    id: aufgabe
+    attributes:
+      label: Aufgabe
+      description: Was ist zu tun? Imperativ, konkret.
+    validations:
+      required: true
+  - type: textarea
+    id: kontext
+    attributes:
+      label: Kontext
+      description: Warum jetzt? Verweise auf Plan-Datei, Incident, Session.
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of Done
+      description: Woran erkennt man, dass es fertig UND verifiziert ist?
+      placeholder: "z. B. curl https://… liefert 200 mit …; Negativ-Test: alter Pfad liefert 404"
+    validations:
+      required: true
+  - type: textarea
+    id: abhaengigkeiten
+    attributes:
+      label: Abhängigkeiten / Blocker
