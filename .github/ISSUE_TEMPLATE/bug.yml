@@ -1,0 +1,39 @@
+name: "🐛 Bug"
+description: "Etwas funktioniert nicht wie erwartet"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: beschreibung
+    attributes:
+      label: Beschreibung
+      description: Was ist kaputt? Symptom, nicht Vermutung.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduktion
+      description: Schritte, um den Fehler auszulösen.
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: erwartet
+    attributes:
+      label: Erwartet vs. Tatsächlich
+    validations:
+      required: true
+  - type: input
+    id: umgebung
+    attributes:
+      label: Umgebung
+      description: Host/CT/VM, URL, Branch/Commit
+      placeholder: "z. B. CT156/pve1, https://albumora.de, main@abc1234"
+  - type: textarea
+    id: evidenz
+    attributes:
+      label: Logs / Evidenz
+      description: Log-Ausschnitte, Screenshots, Netzwerk-Responses.
+      render: shell
