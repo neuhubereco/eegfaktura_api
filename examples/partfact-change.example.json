@@ -1,0 +1,11 @@
+{
+  "meteringPoints": [
+    {
+      "meter": "AT0030000000000000000000000000000",
+      "direction": "CONSUMPTION",
+      "gridOperatorId": "AT003000",
+      "activation": "2026-11-01",
+      "partFact": 50
+    }
+  ]
+}

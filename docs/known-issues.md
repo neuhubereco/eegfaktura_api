@@ -1,44 +1,33 @@
-# Known Issues & offene Fragen
+# Known Issues, Stolperfallen & offene Fragen
 
-Stand: konsolidiert aus Integrationstests (Projekt `eegfakturareport`).
-Diese Datei dokumentiert ehrlich, was **nicht** funktioniert hat — damit der nächste
+Stand: 30.09.2026. Frühere Fassungen dieser Doku beruhten auf Integrationstests und der
+DeepWiki-Zusammenfassung; einige Annahmen daraus haben sich beim Abgleich mit dem Quellcode
+als falsch erwiesen. Diese Datei hält fest, was **nicht** funktioniert – damit der nächste
 Entwickler nicht dieselben Sackgassen durchläuft.
 
 ---
 
-## 1. `GET /api/participant` → `400 Bad Request` mit Basic Auth
+## 1. Basic Auth funktioniert nicht für `/api/participant` – auch nicht für `POST`
 
-**Symptom:** Jede Lese-Abfrage gegen `/api/participant` mit Basic Auth schlägt fehl —
-ohne Parameter und mit allen getesteten Query-Parametern:
+**Frühere Annahme:** `POST /api/participant` funktioniert mit Basic Auth, nur `GET` braucht Bearer.
 
-| Variante | Ergebnis |
-|---|---|
-| `GET /api/participant` | 400 |
-| `GET /api/participant?id=...` | 400 |
-| `GET /api/participant?email=...` | 400 |
-| `GET /api/participant?participantNumber=...` | 400 |
-| `GET /api/participant?meteringPoint=...` | 400 |
-| `GET /api/participant?tenant=...` | 400 |
-| `GET /api/participant?ecId=...` | 400 |
-| `GET /api/participant/{id}` | 404 |
+**Laut Code:** Alle Routen unter `/api/participant` und `/api/meteringpoint` laufen über die
+Bearer-Middleware (`Protect` bzw. `ConditionProtect` in `api/middleware/tokenVerifier.go`).
+Ein `Authorization: Basic …`-Header wird dort mit `403` abgelehnt. Basic Auth (`ProtectApi`) gibt es
+nur für `/api/master/…` und `/energystore/query/…` → [authentication.md](authentication.md).
 
-Die 400er kommen **ohne Response-Body** (Content-Length 0).
+**Beobachtet:** `GET /api/participant` mit Basic Auth lieferte in unseren Tests `400` ohne Body.
+Das aktuelle Backend antwortet in diesem Fall mit `403`; der Unterschied kommt vermutlich aus einer
+älteren Backend-Version oder dem Ingress. In beiden Fällen gilt: Bearer verwenden.
 
-**Ursache (sehr wahrscheinlich):** `GET /api/participant` erwartet einen
-**Keycloak-Bearer-Token**, kein Basic Auth. Basic Auth funktioniert nur für `POST`.
-Die Referenzimplementierung leitet GET-Requests entsprechend auf einen
-Keycloak-Token-Pfad um (`fetchParticipantWithKeycloakToken`).
-
-**Workaround / Lösungsweg:**
-1. Keycloak Access Token besorgen (siehe [authentication.md](authentication.md#2-keycloak-bearer-token-leseoperationen)).
-2. Request mit `Authorization: Bearer {token}` + `X-Tenant` senden.
-3. Falls weiterhin Probleme: Teilnehmerdaten **lokal spiegeln** (siehe Punkt 3).
+**Query-Parameter:** `GET /api/participant` wertet keine Parameter aus (`?id=`, `?email=`,
+`?participantNumber=` …). Ein Einzelabruf per ID existiert nicht.
 
 ---
 
-## 2. Kein einfacher JWT-Login-Endpoint
+## 2. Kein Machine-to-Machine-Zugang für die Participant-API
 
-Es wurde **kein** `username/password`→JWT-Endpoint unter `/api/...` gefunden:
+Es gibt **keinen** `username/password`→JWT-Endpoint unter `/api/…`:
 
 | Versuch | Ergebnis |
 |---|---|
@@ -48,36 +37,86 @@ Es wurde **kein** `username/password`→JWT-Endpoint unter `/api/...` gefunden:
 | `GET /api/auth` | 404 |
 | Selbst signierte JWTs | 401 Unauthorized |
 
-**Konsequenz:** Tokens müssen über den **Keycloak-OIDC-Flow** der offiziellen App
-bezogen werden (Token-Endpoint des Realms `EEGFaktura` auf `login.eegfaktura.at`,
-Client `at.ourproject.vfeeg.app`, `grant_type=refresh_token`).
+**Konsequenz:** Bearer-Tokens kommen aus dem Keycloak-OIDC-Flow der offiziellen Web-App
+(Realm `EEGFaktura`, Client `at.ourproject.vfeeg.app`); eine Integration hält sie per
+`grant_type=refresh_token` am Leben. Der Benutzer muss in der Gruppe `EEG_ADMIN` sein.
 
-**Offene Frage an das eegfaktura-Team:** Gibt es einen **Service-Account- /
-Client-Credentials-Flow** für Server-zu-Server-Integrationen? Das wäre der saubere
-Weg statt Refresh-Token-Recycling aus einer User-Session.
-
----
-
-## 3. Empfohlene Integrationsstrategie
-
-Da es **keine zuverlässige „Liste aller Teilnehmer"-Operation** über Basic Auth gibt:
-
-1. **Beim Anlegen** (`POST /api/participant`) die zurückgegebene `id` +
-   `participantNumber` **lokal persistieren** (eigene DB-Tabelle, z. B. `ParticipantRegistration`).
-2. **Abfragen primär aus der lokalen DB** bedienen, nicht aus der eegfaktura-API.
-3. Für serverseitige Reads die **Keycloak-Bearer-Token-Variante** implementieren.
-4. **Schreibpfade** (`POST`/`PUT`/`DELETE`/`confirm`) über Basic Auth abwickeln.
+**Offen:** Ein Service-Account-/Client-Credentials-Flow bzw. ein `ProtectApi`-Pendant für
+Participant-Schreibzugriffe fehlt →
+[eegfaktura/eegfaktura-backend#9](https://github.com/eegfaktura/eegfaktura-backend/issues/9).
+Die Basic-Routen (`/api/master`, `/energystore/query`) brauchen serverseitig einen Keycloak-Client
+mit „Direct Access Grants“; ob das auf eegfaktura.at für jeden Benutzer freigeschaltet ist,
+entscheidet der Betreiber.
 
 ---
 
-## 4. Noch nicht verifiziert
+## 3. `PUT /api/participant/{id}`: ID aus dem Body, Zählpunkte werden ignoriert
 
-Folgende laut Upstream-Doku vorhandenen Endpoints wurden **nicht** abschließend getestet:
+- Die ID im Pfad wird **nicht** ausgewertet; maßgeblich ist `id` im Body. Fehlt sie →
+  `400` mit `pq: invalid input syntax for type uuid: ""` (Ursache früherer Update-Fehlschläge).
+- `meters` wird **nicht** geschrieben – trotzdem kommt `202`. Zählpunkte ändert man über
+  `/api/meteringpoint/…`, den Teilnahmefaktor über `changepartitionfactor`.
+- `202` kommt mit dem gesendeten Body zurück, auch wenn nichts gespeichert wurde → per `GET` prüfen.
 
-- `PUT /api/participant/{id}` (Update, soll `202` liefern)
-- `DELETE /api/participant/{id}` (Archivieren, soll `202` liefern)
-- `POST /api/participant/{id}/confirm` (Aktivieren, soll `201` liefern)
-- `GET /api/participant` mit gültigem Bearer Token (Erfolgspfad)
+---
+
+## 4. Löschen ist endgültig, Archivieren von Mitgliedern gibt es nicht
+
+- `DELETE /api/participant/{id}` existiert **nicht**. Es gibt nur `DELETE /api/participant/v2/{id}`,
+  und das ist ein **hartes Löschen** inkl. Zählpunkt-Zuordnungen, Adressen, Kontakt- und Bankdaten.
+- Für einen regulären Austritt die Zählpunkte abmelden (`/api/meteringpoint/{pid}/revokemeters`)
+  bzw. archivieren (`/api/meteringpoint/{pid}/archive/{mid}`).
+
+---
+
+## 5. `confirm` ist nur für die Erstanmeldung
+
+- Body ist ein JSON-**Array** von Zählpunkten mit `activationMode` (`ONLINE`/`OFFLINE`) –
+  ohne Body oder mit Objekt → `400`. Fehlt `activationMode`, wird offline angemeldet.
+- Ein zweiter Aufruf für ein aktives Mitglied schickt die EDA-Anmeldung erneut. Für
+  Teilnahmefaktor-Änderungen ist `confirm` der falsche Weg.
+- Der Endpoint verschickt selbst keine E-Mail; die Mails kommen mit den EDA-Antworten.
+
+---
+
+## 6. Feldtypen, die leicht falsch gesetzt werden
+
+- `partFact` ist eine **ganze Prozentzahl** (`100` = voll). `1` bedeutet 1 %. Fehlt `partFact`
+  beim Anlegen eines Zählpunkts, wird `0` gespeichert.
+- `tariffId`/`tariff_id` sind UUIDs; Platzhalter-Strings lassen das Speichern scheitern.
+- `participantNumber` wird nicht vom Server vergeben.
+- Beim Anlegen werden `status` (Mitglied), `tariffId` (Mitglied) sowie `status`/`modifiedAt`
+  (Zählpunkt) vom Server gesetzt bzw. ignoriert.
+
+→ [data-model.md](data-model.md)
+
+---
+
+## 7. Energystore: Sonderzeichen in Basic-Zugangsdaten
+
+Der Energystore dekodiert Basic-Zugangsdaten mit URL-sicherem Base64 und trennt an jedem `:`.
+Passwörter mit `:` oder Zugangsdaten, deren Base64-Form `+`/`/` enthält, scheitern dort mit `403`.
+Abhilfe: Passwort ohne diese Zeichen wählen.
+
+---
+
+## 8. Empfohlene Integrationsstrategie
+
+1. **Mitglieder anlegen/ändern/bestätigen** mit Bearer-Token eines `EEG_ADMIN`-Benutzers
+   (Refresh-Token-Kette mit Keepalive).
+2. Beim Anlegen die zurückgegebene `id` **lokal persistieren**; `participantNumber` selbst vergeben.
+3. Nach `PUT`/`confirm` den Zustand per `GET /api/participant` verifizieren.
+4. **Energiedaten** per Basic Auth aus dem Energystore; Stammdaten für Abrechnung/Abgleich
+   optional per `GET /api/master/masterdata`.
+
+---
+
+## 9. Noch nicht verifiziert
+
+Aus dem Code abgeleitet, aber noch nicht live getestet:
+
+- alle Bearer-Routen unter `/api/participant` und `/api/meteringpoint` (Erfolgspfad)
+- `GET /api/master/masterdata` und `POST /api/master/updatepartfact` mit Basic Auth
 
 Wer diese verifiziert: bitte Ergebnis hier ergänzen.
 
@@ -85,7 +124,9 @@ Wer diese verifiziert: bitte Ergebnis hier ergänzen.
 
 ## Referenzen
 
-- Upstream-Backend: <https://github.com/eegfaktura/eegfaktura-backend>
-- DeepWiki API Layer: <https://deepwiki.com/eegfaktura/eegfaktura-backend/3-api-layer>
-- Zu prüfende Stellen im Backend (Go): `handler/participant.go`, Auth-Middleware (JWT),
-  Routing für `/api/participant`.
+- Backend: <https://github.com/eegfaktura/eegfaktura-backend> – `api/participantController.go`,
+  `api/meteringPointController.go`, `api/apiController.go`, `api/middleware/tokenVerifier.go`,
+  `database/participantDao.go`, `model/participant.go`
+- Energystore: <https://github.com/eegfaktura/eegfaktura-energystore> – `rest/energy.go`,
+  `middleware/api_authentication.go`
+- Offizielle Doku: <https://eegfaktura.github.io/eegfaktura-docs/> (`architecture/auth`, `services/backend`)

@@ -1,61 +1,78 @@
 # EEGFaktura API – Integrations-Dokumentation
 
-Konsolidierte, entwicklerfreundliche Dokumentation der **eegfaktura.at**-API,
-zusammengestellt aus realen Integrationstests einer Energiegemeinschafts-Anbindung.
+Konsolidierte, entwicklerfreundliche Dokumentation der **eegfaktura.at**-API
+(Mitglieder-/Zählpunkt-Verwaltung und Energiedaten-Abruf).
 
-> **Zweck:** Referenz für die Anbindung an die eegfaktura-Backend-API
-> (Teilnehmer-/Participant-Verwaltung + Energiedaten-Abruf).
+> **Zweck:** Referenz für die Anbindung an die eegfaktura-Backend-API.
 > Diese Doku beschreibt die **externe API**, die von eegfaktura.at betrieben wird –
 > nicht eine selbst entwickelte API.
+>
+> **Stand:** 30.09.2026, abgeglichen mit dem Quellcode
+> [`eegfaktura/eegfaktura-backend`](https://github.com/eegfaktura/eegfaktura-backend) (Commit `f4974b2`, 26.09.2026)
+> und [`eegfaktura/eegfaktura-energystore`](https://github.com/eegfaktura/eegfaktura-energystore) (Commit `a254dc8`, 26.09.2026)
+> sowie der offiziellen Doku <https://eegfaktura.github.io/eegfaktura-docs/>.
 
 ---
 
 ## Überblick
 
 - **Base URL:** `https://eegfaktura.at`
-- **Upstream-Backend (Go):** <https://github.com/eegfaktura/eegfaktura-backend>
-- **Primär-Doku (Upstream):** [DeepWiki – eegfaktura-backend API Layer](https://deepwiki.com/eegfaktura/eegfaktura-backend/3-api-layer)
+- **Backend (Go):** <https://github.com/eegfaktura/eegfaktura-backend> – die Routen sind im Backend
+  ohne Präfix eingehängt (`/participant`, `/meteringpoint`, `/master` …); öffentlich erreichbar
+  sind sie unter `https://eegfaktura.at/api/…` (Präfix kommt vom Ingress).
+- **Energystore (Go):** <https://github.com/eegfaktura/eegfaktura-energystore> – öffentlich unter
+  `https://eegfaktura.at/energystore/…`.
+- **Offizielle Doku:** <https://eegfaktura.github.io/eegfaktura-docs/> (u. a. `architecture/auth`, `services/backend`)
 - **Keycloak (Auth):** `https://login.eegfaktura.at`, Realm `EEGFaktura`
 
-Zwei funktionale Bereiche:
-
-| Bereich | Pfad-Präfix | Zweck |
-|---|---|---|
-| **Participant API** | `/api/participant` | Teilnehmer anlegen, ändern, archivieren, bestätigen |
-| **Energystore API** | `/energystore/query` | Zählpunkt-Metadaten & 15-Minuten-Energierohdaten |
+| Bereich | Pfad-Präfix | Zweck | Auth |
+|---|---|---|---|
+| **Participant API** | `/api/participant` | Mitglieder anlegen, ändern, bestätigen, löschen | Bearer (EEG-Admin) |
+| **Metering-Point API** | `/api/meteringpoint` | Zählpunkte anlegen/ändern, Teilnahmefaktor, Abmeldung, Energiedaten anfordern | Bearer (EEG-Admin) |
+| **Master API** | `/api/master` | Stammdaten lesen, Teilnahmefaktor-Änderung beantragen (Server-zu-Server) | Basic |
+| **Energystore API** | `/energystore/query` | Zählpunkt-Metadaten & 15-Minuten-Energierohdaten | Basic |
 
 ---
 
-## ⚠️ Wichtigste Erkenntnis für Integratoren
+## Wichtigste Erkenntnis für Integratoren
 
-Die Authentifizierung ist **nicht einheitlich** über alle Endpoints:
+Die Authentifizierung hängt an der **Middleware der Route**, nicht an der HTTP-Methode:
 
-| Operation | Auth-Methode | Status |
+| Middleware (Backend-Code) | Header | Routen |
 |---|---|---|
-| `POST /api/participant` (Anlegen) | **Basic Auth** (`user:password`) | ✅ funktioniert |
-| `POST /energystore/query/...` | **Basic Auth** | ✅ funktioniert |
-| `GET /api/participant` (Lesen) | **Keycloak Bearer Token** (nicht Basic Auth!) | ⚠️ siehe [Known Issues](docs/known-issues.md) |
+| `Protect` / `ConditionProtect` | `Authorization: Bearer <Keycloak-Access-Token>` | **alle** `/api/participant/…` und `/api/meteringpoint/…` (auch `POST`) |
+| `ProtectApi` | `Authorization: Basic base64(user:passwort)` | nur `/api/master/…` und `/energystore/query/…` |
 
-Basic-Auth-`GET`-Requests gegen `/api/participant` liefern konsistent **400 Bad Request**.
-Details und Workaround → [docs/known-issues.md](docs/known-issues.md).
+- **Basic Auth auf `/api/participant` funktioniert nicht** – auch nicht für `POST`. Der Code
+  (`api/middleware/tokenVerifier.go`) antwortet auf einen Nicht-Bearer-Header mit `403`.
+- Schreibende Participant-/Metering-Point-Routen verlangen ein Token eines Benutzers in der
+  Keycloak-Gruppe **`EEG_ADMIN`** (Claim `access_groups` enthält `/EEG_ADMIN`), sonst `401`.
+- Einen offiziellen Machine-to-Machine-Weg für die Participant-API gibt es derzeit nicht
+  (Feature-Request [eegfaktura/eegfaktura-backend#9](https://github.com/eegfaktura/eegfaktura-backend/issues/9)).
+
+Details → [docs/authentication.md](docs/authentication.md).
 
 ---
 
 ## Schnellstart
 
 ```bash
-# 1. Base64-Credentials für Basic Auth erzeugen
-echo -n "DEIN_API_USER:DEIN_PASSWORT" | base64
-
-# 2. Zählpunkt-Metadaten abrufen (funktioniert mit Basic Auth)
+# Zählpunkt-Metadaten abrufen (Energystore, Basic Auth)
+AUTH=$(printf '%s' "DEIN_API_USER:DEIN_PASSWORT" | base64 | tr -d '\n')
 curl -X POST "https://eegfaktura.at/energystore/query/{ecId}/metadata" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Basic <BASE64>" \
+  -H "Authorization: Basic ${AUTH}" \
   -H "X-Tenant: {tenant}" \
   -d '{}'
+
+# Mitglieder lesen (Backend, Bearer Token eines EEG-Admins)
+curl "https://eegfaktura.at/api/participant" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "X-Tenant: {tenant}"
 ```
 
-Alle Requests senden zusätzlich den Header **`X-Tenant`** (in der Regel der RC-Code, z. B. `RC######`).
+Alle Requests senden zusätzlich den Mandanten-Header **`X-Tenant`** (i. d. R. die RC-/CC-Nummer
+der Gemeinschaft, z. B. `RC######`). Der Wert muss im `tenant`-Claim des Benutzers stehen.
 
 ---
 
@@ -63,11 +80,11 @@ Alle Requests senden zusätzlich den Header **`X-Tenant`** (in der Regel der RC-
 
 | Dokument | Inhalt |
 |---|---|
-| [docs/authentication.md](docs/authentication.md) | Basic Auth + Keycloak-Bearer-Token-Flow, Header, Tenant |
-| [docs/endpoints.md](docs/endpoints.md) | Alle Endpoints mit Request/Response, getestet vs. dokumentiert |
-| [docs/data-model.md](docs/data-model.md) | `Participant`- und `Meter`-Datenmodell (Felder, Enums) |
-| [docs/eda-processes.md](docs/eda-processes.md) | EDA/Ponton-Hintergrund: ECON/CPF/PT-Prozesse, Ablehnungsgründe, Datenverfügbarkeit, API-Lücken |
-| [docs/known-issues.md](docs/known-issues.md) | `GET /participant` 400-Problem, offene Fragen, Empfehlungen |
+| [docs/authentication.md](docs/authentication.md) | Bearer (Keycloak) vs. Basic (`ProtectApi`), Header, Tenant, Statuscodes |
+| [docs/endpoints.md](docs/endpoints.md) | Alle Endpoints mit Request/Response und Statuscodes |
+| [docs/data-model.md](docs/data-model.md) | `Participant`-, `MeteringPoint`- und Request-Modelle (JSON-Feldnamen, Typen) |
+| [docs/eda-processes.md](docs/eda-processes.md) | EDA/Ponton-Hintergrund: ECON/CPF/PT-Prozesse, Ablehnungsgründe, Datenverfügbarkeit |
+| [docs/known-issues.md](docs/known-issues.md) | Stolperfallen, frühere Fehlannahmen, offene Fragen |
 | [openapi.yaml](openapi.yaml) | Maschinenlesbare OpenAPI-3.0-Spec (Swagger/Postman/Codegen) |
 
 ---
@@ -75,17 +92,17 @@ Alle Requests senden zusätzlich den Header **`X-Tenant`** (in der Regel der RC-
 ## Status-Legende
 
 - ✅ **Verifiziert** – in echten Integrationstests erfolgreich
-- ⚠️ **Dokumentiert, nicht verifiziert** – laut Upstream-Doku vorhanden, hier (noch) nicht erfolgreich getestet
-- ❌ **Existiert nicht / schlägt fehl** – getestet, Endpoint antwortet 404 oder dauerhaft 400
+- 📄 **Laut Quellcode** – aus dem Backend-/Energystore-Code abgeleitet, (noch) nicht live getestet
+- ❌ **Existiert nicht / schlägt fehl** – im Code nicht vorhanden bzw. getestet mit Fehler
 
 ---
 
 ## Herkunft & Pflege
 
-Diese Doku ist eine Konsolidierung aus realen Integrationstests
-(Markdown-Notizen + ein TypeScript-Client gegen die eegfaktura.at-API).
-Bei Änderungen an der eegfaktura-API bitte gegen die
-[DeepWiki-Doku](https://deepwiki.com/eegfaktura/eegfaktura-backend/3-api-layer) abgleichen.
+Ursprünglich eine Konsolidierung aus realen Integrationstests (Markdown-Notizen + TypeScript-Client),
+seit 09/2026 gegen den Quellcode der öffentlichen eegfaktura-Repositories abgeglichen.
+Bei Änderungen bitte gegen den Code (`api/*Controller.go`, `api/middleware/`, `model/participant.go`,
+Energystore `rest/energy.go`) und die offizielle Doku abgleichen.
 
 ---
 

@@ -1,14 +1,19 @@
 openapi: 3.0.3
 info:
   title: EEGFaktura API (inoffizielle Integrations-Spec)
-  version: "0.1.0"
+  version: "0.2.0"
   description: >
-    Inoffizielle, aus Integrationstests rekonstruierte OpenAPI-Beschreibung der
-    eegfaktura.at-API (Participant- und Energystore-Bereich). Beschreibt die
-    EXTERNE API von eegfaktura.at, nicht eine selbst entwickelte API.
+    Inoffizielle OpenAPI-Beschreibung der eegfaktura.at-API (Participant-, Metering-Point-,
+    Master- und Energystore-Bereich). Beschreibt die EXTERNE API von eegfaktura.at, nicht eine
+    selbst entwickelte API.
 
-    Auth ist nicht einheitlich: Schreiboperationen + Energystore nutzen Basic Auth,
-    GET /api/participant erwartet einen Keycloak-Bearer-Token. Siehe docs/.
+    Abgeglichen mit dem Quellcode eegfaktura/eegfaktura-backend (Commit f4974b2, 26.09.2026) und
+    eegfaktura/eegfaktura-energystore (Commit a254dc8, 26.09.2026). "VERIFIZIERT" = in
+    Integrationstests bestätigt, "LAUT CODE" = aus dem Quellcode abgeleitet.
+
+    Auth hängt an der Route: /api/participant und /api/meteringpoint verlangen einen
+    Keycloak-Bearer-Token (Gruppe EEG_ADMIN; Basic Auth wird mit 403 abgelehnt).
+    /api/master und /energystore/query verwenden Basic Auth. Siehe docs/authentication.md.
   contact:
     name: eegfaktura-backend (Upstream)
     url: https://github.com/eegfaktura/eegfaktura-backend
@@ -21,78 +26,55 @@ servers:
 
 tags:
   - name: participant
-    description: Teilnehmer-Verwaltung
+    description: Mitglieder-Verwaltung (Bearer)
+  - name: meteringpoint
+    description: Zählpunkt-Verwaltung und EDA-Prozesse (Bearer)
+  - name: master
+    description: Server-zu-Server-Zugriff (Basic)
   - name: energystore
-    description: Zählpunkt-Metadaten und Energierohdaten
+    description: Zählpunkt-Metadaten und Energierohdaten (Basic)
 
 security:
-  - basicAuth: []
+  - bearerAuth: []
 
 paths:
   /api/participant:
-    post:
-      tags: [participant]
-      summary: Teilnehmer anlegen
-      description: "VERIFIZIERT. Basic Auth. Gibt 201 mit generierter id + participantNumber zurück."
-      security:
-        - basicAuth: []
-      parameters:
-        - $ref: '#/components/parameters/XTenant'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Participant'
-      responses:
-        '201':
-          description: Teilnehmer erstellt
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Participant'
-        '400':
-          description: Ungültiges oder unvollständiges Participant-Objekt
     get:
       tags: [participant]
-      summary: Teilnehmer lesen (Tenant)
+      summary: Mitglieder lesen
       description: >
-        DOKUMENTIERT, NICHT VERIFIZIERT. Erwartet Keycloak-Bearer-Token
-        (NICHT Basic Auth — Basic Auth liefert konsistent 400). Siehe docs/known-issues.md.
+        LAUT CODE. EEG_ADMIN erhält alle Mitglieder des Mandanten, EEG_USER nur Mitglieder,
+        deren contact.email der E-Mail im Token entspricht. Keine Query-Parameter.
+      operationId: listParticipants
       security:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XTenant'
-        - name: id
-          in: query
-          required: false
-          schema: { type: string }
-        - name: email
-          in: query
-          required: false
-          schema: { type: string, format: email }
       responses:
         '200':
-          description: Liste/Teilnehmer
+          description: Liste der Mitglieder inkl. Zählpunkte
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Participant'
-        '400':
-          description: Bad Request (u. a. bei Basic Auth statt Bearer)
-
-  /api/participant/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    put:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
       tags: [participant]
-      summary: Teilnehmer aktualisieren
-      description: "DOKUMENTIERT, NICHT VERIFIZIERT. Leere Strings vorher entfernen (UUID-Parse-Fehler)."
+      summary: Mitglied anlegen
+      description: >
+        LAUT CODE. Bearer + EEG_ADMIN (Basic Auth → 403). Der Server vergibt id, setzt
+        status=PENDING und createdBy; participantSince fehlt → heute; tariffId wird beim Anlegen
+        nicht gespeichert; participantNumber wird übernommen, nicht generiert. Je Zählpunkt:
+        processState fehlt → NEW, partFact fehlt → 0.
+      operationId: createParticipant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
       requestBody:
         required: true
         content:
@@ -100,41 +82,565 @@ paths:
             schema:
               $ref: '#/components/schemas/Participant'
       responses:
-        '202':
-          description: Aktualisierung akzeptiert
-    delete:
+        '201':
+          description: Mitglied angelegt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/participant/{id}:
+    put:
       tags: [participant]
-      summary: Teilnehmer archivieren (logisches Löschen)
-      description: "DOKUMENTIERT, NICHT VERIFIZIERT."
+      summary: Stammdaten aktualisieren
+      description: >
+        LAUT CODE. Maßgeblich ist die id im BODY; die ID im Pfad wird nicht ausgewertet
+        (fehlt id im Body → 400 "invalid input syntax for type uuid"). meters wird ignoriert.
+        Leere Felder werden übersprungen. Antwort 202 mit dem gesendeten Body – auch wenn nichts
+        gespeichert wurde.
+      operationId: updateParticipant
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - name: id
+          in: path
+          required: true
+          description: wird vom Server nicht ausgewertet
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/Participant'
+                - type: object
+                  required: [id]
       responses:
         '202':
-          description: Archivierung akzeptiert
+          description: Gesendeter Body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
-  /api/participant/{id}/confirm:
+  /api/participant/v2/{id}:
     parameters:
+      - $ref: '#/components/parameters/XTenant'
       - name: id
         in: path
         required: true
         schema: { type: string, format: uuid }
+    put:
+      tags: [participant]
+      summary: Einzelnes Feld eines Mitglieds ändern
+      description: >
+        LAUT CODE. path = Feldname, für Unterobjekte mit Punkt (contact.email,
+        billingAddress.city, residentAddress.zip, accountInfo.iban …). businessRole=EEG_BUSINESS
+        leert zusätzlich lastname, titleBefore, titleAfter.
+      operationId: updateParticipantField
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldUpdate'
+            example:
+              path: contact.email
+              value: max@example.at
+      responses:
+        '202':
+          description: Neu gelesenes Mitglied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+    delete:
+      tags: [participant]
+      summary: Mitglied endgültig löschen
+      description: >
+        LAUT CODE. Hartes Löschen inkl. Zählpunkt-Zuordnungen, Adressen, Kontakt und Bankdaten
+        (Datenbank-Cascade). Kein Archivieren, keine EDA-Abmeldung. DELETE /api/participant/{id}
+        (ohne v2) existiert nicht.
+      operationId: deleteParticipant
+      responses:
+        '202':
+          description: Gelöscht
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/participant/{id}/confirm:
     post:
       tags: [participant]
-      summary: Teilnehmer bestätigen/aktivieren
+      summary: Neues Mitglied bestätigen und bei EDA anmelden
       description: >
-        DOKUMENTIERT, NICHT VERIFIZIERT. Setzt Status ACTIVE, sendet EBMS-Nachrichten
-        für Zählpunkte (falls EEG online) und Aktivierungs-E-Mail.
+        LAUT CODE. Nur für die Erstaktivierung (PENDING → ACTIVE). Body = JSON-Array der
+        anzumeldenden Zählpunkte. Online-EEG: je Zählpunkt ECON-Anmeldung (activationMode
+        ONLINE; jeder andere Wert gilt als OFFLINE). Offline-EEG: alle Zählpunkte des Mitglieds
+        werden in der DB aktiv gesetzt. Nicht zugeordnete Zählpunkte werden übersprungen.
+        Verschickt selbst keine E-Mail. Ein erneuter Aufruf sendet die Anmeldung erneut.
+      operationId: confirmParticipant
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ConfirmMeter'
       responses:
         '201':
-          description: Teilnehmer bestätigt
+          description: Mitglied bestätigt (EDA-Versand angestoßen)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          description: Parse-/EDA-Fehler. Der Mitgliedsstatus kann bereits ACTIVE sein.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/create:
+    put:
+      tags: [meteringpoint]
+      summary: Zählpunkt zu bestehendem Mitglied hinzufügen
+      description: >
+        LAUT CODE. processState fehlt oder NEW und Mitglied ACTIVE (Online-EEG) → sofortige
+        EDA-Anmeldung mit activationMode ONLINE/OFFLINE. registeredSince wird auf heute
+        gesetzt, außer status ist ACTIVE.
+      operationId: createMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeteringPoint'
+      responses:
+        '201':
+          description: Zählpunkt angelegt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/register:
+    post:
+      tags: [meteringpoint]
+      summary: Vorhandenen Zählpunkt bei EDA anmelden
+      description: >
+        LAUT CODE. Zählpunkt muss dem Mitglied zugeordnet sein. activationMode ONLINE oder
+        OFFLINE, sonst 400. Offline-EEG: keine Aktion, trotzdem 201.
+      operationId: registerMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meteringPoint, activationMode]
+              properties:
+                meteringPoint: { type: string }
+                activationMode: { type: string, enum: [ONLINE, OFFLINE] }
+                activationCode: { type: string }
+      responses:
+        '201':
+          description: Anmeldung angestoßen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/update/{mid}:
+    put:
+      tags: [meteringpoint]
+      summary: Zählpunkt aktualisieren (ganzes Objekt)
+      description: >
+        LAUT CODE. Schreibt das ganze Objekt – nicht mitgesendete Felder werden geleert.
+        participantState muss enthalten sein. Nicht änderbar: meteringPoint, participantId,
+        consentId, partFact. modifiedAt/modifiedBy setzt der Server.
+      operationId: updateMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/MeteringPoint'
+                - type: object
+                  required: [participantState]
+      responses:
+        '202':
+          description: Gesendetes Objekt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/v2/{pid}/update/{mid}:
+    put:
+      tags: [meteringpoint]
+      summary: Einzelnes Feld eines Zählpunkts ändern
+      description: >
+        LAUT CODE. path ist der Spaltenname in der Datenbank (z. B. equipmentName, street,
+        tariff_id, inverterid, grid_operator_id), nicht der JSON-Name.
+      operationId: updateMeteringPointField
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FieldUpdate'
+      responses:
+        '202':
+          description: Neu gelesener Zählpunkt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/v2/{pid}/updateid/{mid}:
+    put:
+      tags: [meteringpoint]
+      summary: Zählpunktnummer ändern
+      description: LAUT CODE.
+      operationId: updateMeteringPointId
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newId]
+              properties:
+                newId: { type: string }
+      responses:
+        '202':
+          description: Zählpunkt mit neuer Nummer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/update/{mid}/partfact:
+    put:
+      tags: [meteringpoint]
+      summary: Teilnahmefaktor nur in der eegfaktura-DB setzen (kein EDA-Prozess)
+      description: LAUT CODE. partFact in Prozent.
+      operationId: setMeteringPointPartFactLocal
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partFact]
+              properties:
+                partFact: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '202':
+          description: Zählpunkt mit neuem Faktor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/changepartitionfactor:
+    post:
+      tags: [meteringpoint]
+      summary: Teilnahmefaktor-Änderung bei EDA beantragen (CPF)
+      description: >
+        LAUT CODE. Löst je Netzbetreiber EC_PRTFACT_CHANGE / ANFORDERUNG_CPF aus. Neuer Faktor
+        erst nach ANTWORT_CPF in eegfaktura. EEG muss online sein, sonst 404.
+      operationId: requestPartitionFactorChange
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartFactChangeRequest'
+      responses:
+        '204':
+          description: Anforderung versendet
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: EEG ist nicht online
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/meteringpoint/{spid}/{dpid}/move/{mid}:
+    put:
+      tags: [meteringpoint]
+      summary: Zählpunkt zu anderem Mitglied verschieben
+      description: LAUT CODE. Der Body wird nur zurückgegeben.
+      operationId: moveMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - name: spid
+          in: path
+          required: true
+          description: bisheriges Mitglied
+          schema: { type: string, format: uuid }
+        - name: dpid
+          in: path
+          required: true
+          description: neues Mitglied
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/MeterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeteringPoint'
+      responses:
+        '202':
+          description: Verschoben
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringPoint'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/archive/{mid}:
+    put:
+      tags: [meteringpoint]
+      summary: Zählpunkt archivieren
+      description: LAUT CODE.
+      operationId: archiveMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      responses:
+        '202': { $ref: '#/components/responses/MeterIdResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/remove/{mid}:
+    delete:
+      tags: [meteringpoint]
+      summary: Nie aktivierten Zählpunkt entfernen
+      description: >
+        LAUT CODE. Entfernt nur Zählpunkte mit status INIT und processState NEW/PENDING/INVALID;
+        sonst ebenfalls 202, aber ohne Wirkung.
+      operationId: removeMeteringPoint
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+        - $ref: '#/components/parameters/MeterId'
+      responses:
+        '202': { $ref: '#/components/responses/MeterIdResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/meteringpoint/{pid}/revokemeters:
+    post:
+      tags: [meteringpoint]
+      summary: Zählpunkte bei EDA abmelden
+      description: >
+        LAUT CODE. Nur aktive Zählpunkte, nur bei Online-EEG. Das Feld "to" enthält die
+        Freitext-Begründung (kein Datum).
+      operationId: revokeMeteringPoints
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/ParticipantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meteringPoints, from]
+              properties:
+                meteringPoints:
+                  type: array
+                  items:
+                    type: object
+                    required: [meter]
+                    properties:
+                      meter: { type: string }
+                      direction: { type: string, enum: [CONSUMPTION, GENERATION] }
+                      consentId: { type: string }
+                from: { type: integer, format: int64, description: Abmeldedatum, Unix-ms }
+                to: { type: string, description: "Begründung (Freitext, optional)" }
+      responses:
+        '201':
+          description: Abmeldung angestoßen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/meteringpoint/syncenergy:
+    post:
+      tags: [meteringpoint]
+      summary: Energiedaten beim Netzbetreiber anfordern (PT)
+      description: LAUT CODE. Nur bei Online-EEG; auf den aktiven Zeitraum des Zählpunkts begrenzt.
+      operationId: requestEnergyData
+      parameters:
+        - $ref: '#/components/parameters/XTenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meteringPoints, from, to]
+              properties:
+                meteringPoints:
+                  type: array
+                  items:
+                    type: object
+                    required: [meter]
+                    properties:
+                      meter: { type: string }
+                      direction: { type: string, enum: [CONSUMPTION, GENERATION] }
+                from: { type: integer, format: int64, description: Unix-ms }
+                to: { type: integer, format: int64, description: Unix-ms }
+      responses:
+        '204':
+          description: Anforderung versendet
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/master/masterdata:
+    get:
+      tags: [master]
+      summary: Stammdaten aller Mitglieder (Server-zu-Server)
+      description: LAUT CODE. Basic Auth (ProtectApi), nur Header X-Tenant. Noch nicht live getestet.
+      operationId: getMasterData
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenantOnly'
+      responses:
+        '200':
+          description: Mitglieder mit Zählpunkten
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MasterDataParticipant'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/master/updatepartfact:
+    post:
+      tags: [master]
+      summary: Teilnahmefaktor-Änderung bei EDA beantragen (Server-zu-Server)
+      description: >
+        LAUT CODE. Basic Auth (ProtectApi). Wie /api/meteringpoint/changepartitionfactor,
+        aber Antwort 201; leere Liste → 400; EEG nicht online → 404. Noch nicht live getestet.
+      operationId: requestPartitionFactorChangeApi
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTenantOnly'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartFactChangeRequest'
+      responses:
+        '201':
+          description: Anforderung versendet
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: EEG ist nicht online
+        '500': { $ref: '#/components/responses/ServerError' }
 
   /energystore/query/{ecId}/metadata:
     post:
       tags: [energystore]
       summary: Zählpunkt-Metadaten (verfügbare Zeiträume)
       description: "VERIFIZIERT. Basic Auth. Body ist ein leeres JSON-Objekt."
+      operationId: getEnergyMetadata
       security:
         - basicAuth: []
       parameters:
-        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/XTenantOnly'
         - name: ecId
           in: path
           required: true
@@ -157,19 +663,24 @@ paths:
                 additionalProperties:
                   $ref: '#/components/schemas/MetadataPeriod'
               example:
-                "AT00300000000000000000000000000000":
+                "AT0030000000000000000000000000000":
                   periodBegin: 1733266800000
                   periodEnd: 1764025200000
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /energystore/query/rawdata:
     post:
       tags: [energystore]
       summary: Energie-Rohdaten (15-Minuten-Werte)
-      description: "VERIFIZIERT. Basic Auth. start/end als absolute Unix-Millisekunden."
+      description: >
+        VERIFIZIERT. Basic Auth. start/end als absolute Unix-Millisekunden. cps leer → alle im
+        Zeitraum aktiven Zählpunkte des Mandanten. format "csv" liefert CSV.
+      operationId: getEnergyRawData
       security:
         - basicAuth: []
       parameters:
-        - $ref: '#/components/parameters/XTenant'
+        - $ref: '#/components/parameters/XTenantOnly'
       requestBody:
         required: true
         content:
@@ -185,20 +696,28 @@ paths:
                 type: object
                 additionalProperties:
                   $ref: '#/components/schemas/RawDataSeries'
+            text/csv:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
 components:
   securitySchemes:
     basicAuth:
       type: http
       scheme: basic
-      description: Basic Auth (base64(user:password)). Für POST + Energystore.
+      description: >
+        Basic Auth (base64(user:password)), serverseitig per Keycloak-Password-Grant getauscht.
+        Nur für /api/master/* und /energystore/query/*.
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
       description: >
-        Keycloak Access Token (Realm EEGFaktura, login.eegfaktura.at,
-        Client at.ourproject.vfeeg.app). Für GET /api/participant.
+        Keycloak Access Token (Realm EEGFaktura, login.eegfaktura.at, Client
+        at.ourproject.vfeeg.app). Schreibende Routen verlangen die Gruppe EEG_ADMIN
+        (Claim access_groups enthält "/EEG_ADMIN").
 
   parameters:
     XTenant:
@@ -206,9 +725,77 @@ components:
       in: header
       required: true
       schema: { type: string }
-      description: Tenant-Kennung, i. d. R. der RC-Code (z. B. RC######).
+      description: >
+        Mandant, i. d. R. die RC-/CC-Nummer. Muss im tenant-Claim stehen. Bearer-Routen
+        akzeptieren alternativ den Header "tenant".
+    XTenantOnly:
+      name: X-Tenant
+      in: header
+      required: true
+      schema: { type: string }
+      description: Mandant, i. d. R. die RC-/CC-Nummer. Basic-Routen lesen nur X-Tenant.
+    ParticipantId:
+      name: pid
+      in: path
+      required: true
+      description: Mitglieds-ID
+      schema: { type: string, format: uuid }
+    MeterId:
+      name: mid
+      in: path
+      required: true
+      description: Zählpunktnummer (AT…)
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Ungültiger Request oder Datenbankfehler
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Token ungültig oder Benutzer nicht in der nötigen Gruppe
+    Forbidden:
+      description: Kein/falsches Authorization-Schema, falsche Zugangsdaten oder Mandant nicht im Token
+    ServerError:
+      description: Fehler beim Speichern oder beim EDA-Versand
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    MeterIdResponse:
+      description: Betroffener Zählpunkt
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              meteringpoint: { type: string }
 
   schemas:
+    Error:
+      type: object
+      description: Fehlerhülle; bei manchen Fehlern auch ein leeres Objekt oder Klartext.
+      properties:
+        error:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                code: { type: integer }
+                error: { type: string }
+                message: { type: string }
+
+    FieldUpdate:
+      type: object
+      required: [path, value]
+      properties:
+        path: { type: string, example: contact.email }
+        value:
+          nullable: true
+          description: neuer Wert (JSON-Typ des Zielfelds)
+
     MetadataPeriod:
       type: object
       properties:
@@ -217,11 +804,12 @@ components:
 
     RawDataQuery:
       type: object
-      required: [ecId, cps, start, end]
+      required: [ecId, start, end]
       properties:
         ecId: { type: string }
         cps:
           type: array
+          description: leer oder fehlend → alle im Zeitraum aktiven Zählpunkte des Mandanten
           items:
             type: object
             required: [meteringPoint]
@@ -229,6 +817,7 @@ components:
               meteringPoint: { type: string }
         start: { type: integer, format: int64, description: absolute Unix-ms }
         end: { type: integer, format: int64, description: absolute Unix-ms }
+        format: { type: string, enum: [csv], description: optional; liefert CSV statt JSON }
       example:
         ecId: "{ecId}"
         cps:
@@ -275,104 +864,190 @@ components:
     Participant:
       type: object
       required:
-        - businessRole
-        - role
         - firstname
-        - lastname
-        - participantSince
-        - meters
-        - status
-        - contact
         - billingAddress
         - residentAddress
-        - accountInfo
       properties:
-        id: { type: string, format: uuid, readOnly: true }
-        participantNumber: { type: string, readOnly: true }
-        businessRole: { type: string, enum: [EEG_PRIVATE, EEG_BUSINESS] }
-        role: { type: string, enum: [EEG_USER, EEG_ADMIN] }
+        id:
+          type: string
+          format: uuid
+          description: beim Anlegen vom Server vergeben; bei PUT /api/participant/{id} Pflicht im Body
+        participantNumber: { type: string, nullable: true, description: wird übernommen, nicht generiert }
+        businessRole: { type: string, enum: [EEG_PRIVATE, EEG_BUSINESS], default: EEG_PRIVATE }
+        role: { type: string, enum: [EEG_USER, EEG_ADMIN], default: EEG_USER }
         firstname: { type: string }
         lastname: { type: string }
         titleBefore: { type: string, nullable: true }
         titleAfter: { type: string, nullable: true }
-        participantSince: { type: string, description: ISO-Datum }
+        participantSince: { type: string, format: date, nullable: true, description: fehlt → heute }
         vatNumber: { type: string, nullable: true }
         taxNumber: { type: string, nullable: true }
         companyRegisterNumber: { type: string, nullable: true }
         meters:
           type: array
-          items: { $ref: '#/components/schemas/Meter' }
-        tariffId: { type: string, nullable: true }
-        status: { type: string, enum: [PENDING, ACTIVE, INACTIVE] }
+          description: wird bei PUT /api/participant/{id} ignoriert
+          items: { $ref: '#/components/schemas/MeteringPoint' }
+        tariffId:
+          type: string
+          format: uuid
+          nullable: true
+          description: wird beim Anlegen nicht gespeichert, nur per PUT
+        status:
+          type: string
+          readOnly: true
+          description: vom Server gesetzt (Anlegen → PENDING, confirm → ACTIVE)
+          enum: [NEW, INIT, PENDING, APPROVED, ACTIVE, INACTIVE, REJECTED, REVOKED, INVALID, ARCHIVED, ABORTED, RESTORE, WARN]
         version: { type: integer }
-        createdBy: { type: string }
+        createdBy: { type: string, readOnly: true }
         contact:
           type: object
-          required: [email]
           properties:
             phone: { type: string, nullable: true }
-            email: { type: string, format: email }
+            email:
+              type: string
+              nullable: true
+              description: wird normalisiert und geprüft; mehrere Adressen mit ";" getrennt
         billingAddress: { $ref: '#/components/schemas/Address' }
         residentAddress: { $ref: '#/components/schemas/Address' }
         accountInfo:
           type: object
-          required: [sepaDirectDebit]
           properties:
             iban: { type: string, nullable: true }
             owner: { type: string, nullable: true }
             bankName: { type: string, nullable: true }
             mandateReference: { type: string, nullable: true }
-            mandateDate: { type: string, nullable: true }
-            sepaDirectDebit: { type: string, enum: [CORE, B2B] }
+            mandateDate: { type: string, format: date, nullable: true }
+            sepaDirectDebit: { type: string, nullable: true, enum: [CORE, B2B, null] }
 
     Address:
       type: object
-      required: [type, street, streetNumber, zip, city]
+      required: [type]
       properties:
         type: { type: string, enum: [BILLING, RESIDENCE] }
-        street: { type: string }
-        streetNumber: { type: string }
-        zip: { type: string }
-        city: { type: string }
+        street: { type: string, nullable: true }
+        streetNumber: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        city: { type: string, nullable: true }
 
-    Meter:
+    MeteringPoint:
       type: object
       required:
         - meteringPoint
         - direction
-        - status
-        - tariff_id
-        - registeredSince
-        - modifiedAt
-        - processState
-        - participantState
         - partFact
       properties:
-        meteringPoint: { type: string }
-        consentId: { type: string, nullable: true }
+        meteringPoint: { type: string, description: "Zählpunktnummer (33-stellig, AT…)" }
+        participantId: { type: string, format: uuid, readOnly: true }
+        consentId: { type: string, nullable: true, readOnly: true }
         transformer: { type: string, nullable: true }
         direction: { type: string, enum: [CONSUMPTION, GENERATION] }
-        status: { type: string, enum: [INIT, NEW, ACTIVE, ACTIVATED, REGISTERED] }
-        statusCode: { type: string, nullable: true }
-        tariff_id: { type: string, description: "snake_case (im Gegensatz zu participant.tariffId)" }
+        status:
+          type: string
+          readOnly: true
+          enum: [INIT, ACTIVE, INACTIVE]
+          description: aus processState abgeleitet
+        statusCode: { type: integer, nullable: true, readOnly: true }
+        tariff_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "snake_case (im Gegensatz zu participant.tariffId)"
         equipmentNumber: { type: string, nullable: true }
         equipmentName: { type: string, nullable: true }
         inverterid: { type: string, nullable: true }
-        street: { type: string }
-        streetNumber: { type: string }
-        city: { type: string }
-        zip: { type: string }
-        registeredSince: { type: string, description: ISO-Datum }
-        modifiedAt: { type: string, description: ISO-Datum }
-        modifiedBy: { type: string }
-        gridOperatorId: { type: string }
-        gridOperatorName: { type: string }
-        processState: { type: string, enum: [NEW, ACTIVE, INACTIVE] }
+        street: { type: string, nullable: true }
+        streetNumber: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        registeredSince: { type: string, format: date, description: fehlt → heute }
+        modifiedAt: { type: string, readOnly: true }
+        modifiedBy: { type: string, readOnly: true }
+        gridOperatorId: { type: string, nullable: true }
+        gridOperatorName: { type: string, nullable: true }
+        processState:
+          type: string
+          description: fehlt → NEW
+          enum: [NEW, INIT, PENDING, APPROVED, ACTIVE, INACTIVE, REJECTED, REVOKED, INVALID, ARCHIVED, ABORTED, RESTORE, WARN]
         participantState:
           type: object
           properties:
-            activeSince: { type: string, nullable: true }
-            inactiveSince: { type: string, nullable: true }
-        partFact: { type: number }
-        activationMode: { type: string }
+            activeSince: { type: string, format: date, nullable: true }
+            inactiveSince: { type: string, format: date, nullable: true }
+        partFact:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Teilnahmefaktor in Prozent; fehlt er beim Anlegen, wird 0 gespeichert
+        activationMode: { type: string, enum: [ONLINE, OFFLINE] }
+        activationCode: { type: string }
         allocationFactor: { type: number, nullable: true }
+
+    ConfirmMeter:
+      type: object
+      required: [meteringPoint, activationMode]
+      properties:
+        meteringPoint: { type: string }
+        activationMode:
+          type: string
+          enum: [ONLINE, OFFLINE]
+          description: jeder Wert außer ONLINE wird als Offline-Anmeldung behandelt
+        activationCode: { type: string }
+        registeredSince: { type: string, format: date }
+
+    PartFactChangeRequest:
+      type: object
+      required: [meteringPoints]
+      properties:
+        meteringPoints:
+          type: array
+          items:
+            type: object
+            required: [meter, direction, activation, partFact]
+            properties:
+              meter: { type: string, description: "Zählpunktnummer – Feldname meter, nicht meteringPoint" }
+              direction: { type: string, enum: [CONSUMPTION, GENERATION] }
+              gridOperatorId: { type: string }
+              activation: { type: string, format: date, description: gültig ab }
+              partFact: { type: integer, minimum: 0, maximum: 100, description: Prozent }
+      example:
+        meteringPoints:
+          - meter: AT0030000000000000000000000000000
+            direction: CONSUMPTION
+            gridOperatorId: AT003000
+            activation: "2026-11-01"
+            partFact: 50
+
+    MasterDataParticipant:
+      type: object
+      properties:
+        participantNumber: { type: string }
+        firstname: { type: string }
+        lastname: { type: string }
+        titleBefore: { type: string }
+        titleAfter: { type: string }
+        participantSince: { type: string, format: date-time }
+        status: { type: string }
+        meters:
+          type: array
+          items: { $ref: '#/components/schemas/MasterDataMeter' }
+
+    MasterDataMeter:
+      type: object
+      properties:
+        meteringPoint: { type: string }
+        consentId: { type: string }
+        transformer: { type: string }
+        direction: { type: string, enum: [CONSUMPTION, GENERATION] }
+        status: { type: string, enum: [INIT, ACTIVE, INACTIVE] }
+        equipmentNumber: { type: string }
+        equipmentName: { type: string }
+        inverterid: { type: string }
+        registeredSince: { type: string, format: date }
+        gridOperatorId: { type: string }
+        gridOperatorName: { type: string }
+        processState: { type: string, description: in dieser Antwort nicht befüllt }
+        partFact: { type: integer, description: Prozent }
+        activationMode: { type: string, description: in dieser Antwort nicht befüllt }
+        allocationFactor: { type: number }
+        activeSince: { type: string, format: date-time }
+        inactiveSince: { type: string, format: date-time }
